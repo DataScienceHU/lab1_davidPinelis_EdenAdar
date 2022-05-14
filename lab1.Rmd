@@ -1,0 +1,444 @@
+---
+title: "lab_1"
+author: "David Pinelis and Eden Edri"
+date: "29 4 2022"
+output: html_document
+---
+
+```{r}
+library(lubridate)
+library(tidyverse) 
+library(data.table)
+library(rworldmap) 
+library(ggthemes)
+library(reshape2) 
+library(e1071)
+```
+# Solution:
+
+# Question 1
+# Q1.A
+# Load & change date
+```{r}
+dt <- read.csv("C:/Users/Elior/OneDrive/שולחן העבודה/R/עבודות/מעבדה 1/covid-data.csv")
+dt <- as.data.table(dt)
+dt$date <- dmy(dt$date)
+class(dt$date)
+```
+
+
+## Q1.B
+## Top 5 new cases\new deaths\new vaccinations in "High income" location:
+```{r}
+dt[location == "High income", .(date, new_cases)][order(-new_cases)][1:5]
+
+dt[location == "High income", .(date, new_deaths)][order(-new_deaths)][1:5]
+
+dt[location == "High income", .(date, new_vaccinations)][order(-new_vaccinations)][1:5]
+```
+
+
+# Question 2
+## Q2.A
+```{r}
+create_plot <- function(dt, column){
+  res_plot <- 
+  dt[location %in% c("Low income", "High income")] %>% 
+    ggplot() +
+    aes_string(
+      x = "date",
+      y = column,
+      color = "location"
+    ) +
+    geom_line()  +
+    theme_classic()
+  
+  return(res_plot)
+}
+```
+
+
+## Q2.B
+```{r}
+create_plot(dt, "new_cases_per_million")
+
+dt$log_new_cases_smoothed_per_million <- 
+  log(dt$new_cases_smoothed_per_million)
+
+create_plot(dt, "log_new_cases_smoothed_per_million")
+
+dt$log_new_vaccinations_smoothed_per_million <- 
+  log(dt$new_vaccinations_smoothed_per_million)
+
+create_plot(dt, "log_new_vaccinations_smoothed_per_million")
+
+dt$log_new_deaths_smoothed_per_million <- 
+  log(dt$new_deaths_smoothed_per_million)
+
+create_plot(dt, "log_new_deaths_smoothed_per_million")
+```
+
+Applying log approximation allows us to observe the data easier. The log approximation provides us the approximate percentage change for the new cases / new vaccinations / new deaths respectively. Now, we can spot a relatively similar tendency of the two curves, high income countries' and low income countries', and conclude several realizations. 
+First, there is no a significant difference between the two country types, regarding the graphs' changing pace. 
+Secondly, the difference between the two graphs' percentage change can be explained by the fact that high income countries monitor the pandemic's data better than low income countries (applying more Covid tests, vaccinating a greater majority of the population and a better tracking of cause of death). 
+ 
+ 
+# Question 3
+## Q3.A
+```{r}
+current <- dt[, lapply(.SD, function(x) tail(x[!is.na(x)],1)), by = location]
+
+current <- 
+  current[continent != "",
+             .(
+    location,
+    continent,
+    total_cases_per_million, 
+    total_deaths_per_million, 
+    total_vaccinations_per_hundred,  
+    people_fully_vaccinated_per_hundred,
+    total_boosters_per_hundred,
+    excess_mortality_cumulative_per_million
+  )]
+
+```
+
+
+## Q3.B
+```{r}
+current %>% 
+  ggplot() +
+  aes(
+    x = total_deaths_per_million
+  ) +
+  geom_histogram(bins = 30)
+
+```
+
+The graph doesn't show a normal distribution, due to a lack of a symmetrical bell curve around the zero.
+The histogram is more similar to the right tailed asymmetric distribution.
+
+```{r}
+e1071::skewness(current$total_deaths_per_million, na.rm = TRUE)
+```
+ 
+A positive skewness indicates that the tail of our distribution is on the right.
+After looking at the graph, we definitely expect the average to be greater than the median.
+
+```{r}
+e1071::kurtosis(current$total_deaths_per_million, na.rm = TRUE)
+```
+
+A higher kurtosis corresponds to greater extremity of deviations, and not the configuration of data near the mean. In our words, we can translate the graph into relatively fat tailed distribution.
+
+## Q3.C
+```{r}
+reg_model <- 
+  lm(
+    total_deaths_per_million ~ total_cases_per_million,
+    data = current
+  )
+
+print(reg_model$coefficients[2])
+```
+The slope represents the relation between total cases per million and total deaths per million, that is the probability to die from the disease on this specific date. For every new case there are  0.004 new deaths.  
+
+```{r}
+current %>% 
+  ggplot() +
+  aes(
+    y = total_deaths_per_million,
+    x = total_cases_per_million
+  ) +
+  geom_point() +
+  geom_smooth(method='lm', se = F) +
+  theme_classic()
+```
+
+
+# Question 4
+## Q4.A
+```{r}
+current[continent != ""] %>% 
+  ggplot() +
+  aes(
+    x = continent,
+    y = total_vaccinations_per_hundred,
+    fill=continent
+  ) +
+  geom_boxplot() + 
+  labs(title="Boxplot of total vaccinations per hundred by continent")
+```
+
+### outlier 1:
+```{r}
+current[continent == "North America", .(location, total_vaccinations_per_hundred)][order(-total_vaccinations_per_hundred)][1]
+
+```
+### outlier 2: 
+```{r}
+current[continent == "Europe", .(location, total_vaccinations_per_hundred)][order(-total_vaccinations_per_hundred)][1]
+```
+
+
+## Q4.B
+```{r}
+dt$booster_ratio <- 
+  dt$total_boosters / dt$people_fully_vaccinated
+
+ggplot(dt[location %in% c("Africa","Asia","Europe","North America","Oceania","South America")]) +
+  aes(
+    x = date,
+    y = booster_ratio,
+    color = location,
+  ) +
+  geom_line() +
+  theme_classic()
+```
+
+It is easy to see that starting from July 2021 there was a constant growth of booster ratio in all the continents, which indicates a general vaccination tendency all over the world. 
+
+
+# Question 5  
+## Q5.A
+```{r}
+dt$month <- 
+  floor_date(dt$date, "month")
+  
+data_for_q5_a <- 
+  dt[
+    continent != "" & month <= "2022-03-01", 
+    .(monthly_sum = sum(new_cases_per_million, na.rm = T)),
+    by =  .(month, location)] 
+```
+
+## new_cases_per_million
+
+```{r}
+data_for_q5_a %>% 
+  ggplot() +
+  geom_boxplot(aes(x = factor(month), y = monthly_sum)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90))+ 
+  labs(title="Boxplot of new cases per million by month")
+  
+```
+
+We can see a growth in cases per million over time. The highest number of cases per million occurs at the beginning of 2022, as we know the beginning of the spread of the omicron.
+
+## Q5 b
+### new_deaths
+```{r}
+data_for_q5_b_new_deaths <- 
+  dt[
+    continent != "" & month <= "2022-03-01", 
+    .(monthly_sum = sum(new_deaths, na.rm = T)),
+    by =  .(month, location)] 
+
+data_for_q5_b_new_deaths %>% 
+  ggplot() +
+  geom_boxplot(aes(x = factor(month), y = monthly_sum)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90))+ 
+  labs(title="Boxplot of new death by month")
+```
+
+We can see that starting from March 2020 there is a sudden growth in new death cases, and over time there is a slight fluctuation in new death cases (depends on the month). Also, in the beginning of 2021 there is a relatively high rise in new death cases. 
+
+### new_vaccinations
+```{r}
+data_for_q5_b_new_vaccinations <- 
+  dt[
+    continent != "" & month <= "2022-03-01", 
+    .(monthly_sum = sum(new_vaccinations, na.rm = T)),
+    by =  .(month, location)] 
+
+data_for_q5_b_new_vaccinations %>% 
+  ggplot() +
+  geom_boxplot(aes(x = factor(month), y = monthly_sum)) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 90))+ 
+  labs(title="Boxplot of new vaccinations by month")
+
+```
+
+The vaccinations began only in the end of 2021, starting from which there was an increase in vaccinations over time.
+
+# Question 6
+```{r}
+dt[, ":="(shift_7_new_cases_smoothed = shift(new_cases_smoothed, 7)), by = .(location)]
+
+dt$R_cases <- 
+dt$new_cases_smoothed / dt$shift_7_new_cases_smoothed
+
+dt$R_cases[is.nan(dt$R_cases)] <- NA
+dt$R_cases[is.infinite(dt$R_cases)] <- NA
+
+```
+
+
+## Creat plot of R:
+```{r}
+ggplot(dt[location %in% c('Israel', 'United Kingdom', 'United States')]) +
+  aes(
+    x = date,
+    y = R_cases,
+    color = location,
+  ) +
+  geom_line() +
+  theme_classic()
+
+ggplot(dt[location %in% c('Israel', 'United Kingdom', 'United States')]) +
+  aes(
+    x = date,
+    y = log(R_cases),
+    color = location,
+  ) +
+  geom_line() +
+  theme_classic()
+```
+
+After applying log approximation on the graphs, due to an inconvenience in reading the graphs, we are able to observe the change in the spreading of the disease of the countries. The findings are, that while the fluctuation of both israel's and the USA's change in spreading is similar, Israel's fluctuation is higher. furthermore, there is an opposite relation between Israel's and USA's and between the United Kingdom's disease progression- there are plenty points over time when the graph's curves are opposite.         
+
+# Question 7
+```{r}
+joinData <- joinCountryData2Map(current,
+                                joinCode = "NAME",
+                                nameJoinColumn = "location")
+
+mapCountryData( joinData, nameColumnToPlot="total_deaths_per_million")
+current[order(-total_deaths_per_million)]$location[1:3]
+```
+
+```{r}
+mapCountryData( joinData, nameColumnToPlot="total_vaccinations_per_hundred")
+current[order(-total_vaccinations_per_hundred)]$location[1:3]
+```
+
+```{r}
+mapCountryData( joinData, nameColumnToPlot="excess_mortality_cumulative_per_million")
+current[order(-excess_mortality_cumulative_per_million)]$location[1:3]
+```
+
+We can see that in general there is an opposite correlation between countries' death toll and between their vaccination rate- the more countries vaccinate, the lower their death cases per million. In some other countries, such as the African ones, we can not conclude that there is a relation between vaccinations and death toll due to a lack in data collection. 
+
+
+# Question 8
+## Q8.A
+```{r}
+cor_function_for_Q8 <- function(data, location_name, name_x, name_y){
+  data_for_cor <- data[location == location_name, .(x = get(name_x), y = get(name_y))]
+  
+  res_vector <- rep(NA, 121)
+  for(i in -60:60){
+    data_for_cor[, ":="(shift_y = shift(y, i))]
+    res_vector[61 + i] <- cor(data_for_cor$x, data_for_cor$shift_y, use = "complete.obs")
+  }
+  
+  return(res_vector)
+}
+```
+
+
+## Q8.B
+```{r}
+cross_correlation_vector <- cor_function_for_Q8(dt,'World',"new_cases_smoothed", "new_deaths_smoothed")
+
+data_for_q8_plot <- 
+  data.table(
+    x = -60:60,
+    y = cross_correlation_vector
+  )
+
+data_for_q8_plot %>% 
+  ggplot() +
+  geom_point(
+    aes(
+      x = x,
+      y = y
+    )
+  ) +
+  labs(title="Cross-correlation for new cases smoothed and new deaths smoothed")
+
+data_for_q8_plot[order(-y)][1]
+
+```
+
+The maximum correlation happens when the delta time is -13. 
+The time gap between indicating a presence of Covid and being infected with it is usualy about two weeks. Therefor, severe cases that end with death are correlated the most 13 days after beeing daignozed with Covid. 
+
+# Question 9
+## Q9.A
+
+```{r}
+dt$death_rate <- 
+  dt$total_deaths / dt$total_cases
+
+ggplot(dt[location %in% c("Africa","Asia","Europe","North America","Oceania","South America", "World") & date >= "2021-01-01"]) +
+  aes(
+    x = date,
+    y = death_rate,
+    color = location,
+    group = location
+  ) +
+  geom_line() +
+  theme_classic()
+
+```
+
+The graphs show that there is a decrease  in death rate over time. We may be able to explain the decrease with several explanations: the first, by an increase of daily Covid tests, the deaths - number of Covid tests ratio decreases, thus, the death rate decreases accordingly. The second: natural immunization and higher resistance to the virus over time. The third: as we can see in the next question, the growing number of vaccinations can also explain the reduction of the death rate.    
+
+## Q9.B
+```{r}
+ggplot(dt[location %in% c("Africa","Asia","Europe","North America","Oceania","South America", "World") & date >= "2021-01-01"]) +
+  aes(
+    x = date,
+    y = total_vaccinations_per_hundred,
+    color = location,
+  ) +
+  geom_line() +
+  theme_classic()
+```
+
+We may assume that there is a negative correlation between vaccinations and death rate- a higher number of daily vaccinations results a lower death rate.  
+
+# Question 10
+## Q10.A
+```{r}
+current[, ":="(in_interval = total_deaths_per_million > excess_mortality_cumulative_per_million - 2000 & total_deaths_per_million < excess_mortality_cumulative_per_million + 2000)]
+
+current %>% mutate(in_out_interval = ifelse(excess_mortality_cumulative_per_million>=total_deaths_per_million+2000|
+      excess_mortality_cumulative_per_million<=total_deaths_per_million-2000,"out", "in")) %>%
+  ggplot() +
+  aes(
+    x = total_deaths_per_million,
+    y = excess_mortality_cumulative_per_million,
+    color = in_interval
+  ) +
+  geom_point() +
+  geom_text(aes(label = ifelse(in_out_interval == "out",location,""))) + 
+  geom_abline(intercept = 0, slope = 1, color = "blue") +
+  geom_abline(intercept = 2000, slope = 1, color = "pink") +
+  geom_abline(intercept = -2000, slope = 1, color = "green")
+
+
+
+dt[
+  location %in% current[in_interval == F]$location,
+  sum(!is.na(excess_mortality_cumulative_per_million)),
+  by = location
+]
+
+```
+
+## Q10.B
+```{r}
+dt[location %in% c("Bulgaria", "Lithuania", "Romania")] %>% 
+  ggplot() +
+  geom_point(aes(x = date,y = excess_mortality_cumulative_per_million, color = location)) + 
+  geom_line(aes(x = date, y = total_deaths_per_million,color = location ))+ 
+  labs(x="Date", y= "Number of death")
+    
+```
+
+Throughout time, starting from 1\2020 we can see that there are periods of time when most death cases are not explained by death from Covid- these can be explained by vaccinating (first vaccinations and later the boosters) which cause the decrease in death rate from Covid. Other periods of time show an increase of Covid as cause of death - can be explained due to a decrease of the vaccinations' immunity to the virous.     
